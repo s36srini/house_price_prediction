@@ -1,0 +1,52 @@
+{
+  "cells": [
+    {
+      "metadata": {
+        "_uuid": "6f96abf5065558abb7ace42a2ff181fe40053d73",
+        "_execution_state": "idle",
+        "trusted": true
+      },
+      "cell_type": "code",
+      "source": "library(tidyverse)\nlibrary(data.table)\nlibrary(dplyr)\nlibrary(plyr)\nlibrary(gbm)\nlibrary(randomForest)\n\ntrain.data <- data.frame(fread(file = '../input/train.csv'))\ntest.data <- data.frame(fread(file = '../input/test.csv'))\n\n# Indicators to determine whether a given row when combined will be train/test data\ntrain.data$isTrain <- TRUE\ntest.data$isTrain <- FALSE\n\n# Columns with excessive NA, > 70%\ndrop_cols <- c(\"PoolQC\", \"Fence\", \"MiscFeature\", \"Alley\")\n\n# Use rfImpute to remove NA and run RF\ntrain.data.imputed <- mutate_if(train.data, is.character, as.factor)\ntrain.data.imputed <- train.data.imputed[, !names(train.data.imputed) %in% drop_cols]\ntrain.data.imputed$isTrain <- NULL\ntrain.data.imputed <- rfImpute(x = SalePrice ~ ., data = train.data.imputed)\n\ntest_rf <- randomForest(formula = SalePrice ~., data = train.data.imputed, ntree = 400)\nimportance(test_rf)\n",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "762b692de88be0a09ea5720c4fdc89cc4456d9bf"
+      },
+      "cell_type": "code",
+      "source": "\n# Set SalePrice for test data to NA in order to bind the two tables\ntest.data$SalePrice <- NA\n\n# Bind two tables to data clean both simultaneously\nfull.data <- rbind(train.data, test.data)\n\n# Change all character columns to factors\nfull.data <- mutate_if(full.data, is.character, as.factor)\n\n# Columns that contain very large amounts of missing values,\n# easier to just omit them (~1200+/>70% of dataset)\nfull.data <- full.data[,!names(full.data) %in% drop_cols] \n\nna_count <- data.frame(col_name = colnames(full.data),\n                       na_count = sapply(full.data, function(y) sum(length(which(is.na(y))))))\nna_count <- filter(na_count, na_count > 0)\n                                          \n# Basement Data Cleaning\n# Replace NA with mode, very small size of NAs being replaced, so this is acceptible\n# NA = 81, NA = 82, NA = 82, NA = 79, NA = 80\nfull.data[is.na(full.data$BsmtQual), \"BsmtQual\"] <- 'TA'\nfull.data[is.na(full.data$BsmtCond), \"BsmtCond\"] <- 'TA'                     \nfull.data[is.na(full.data$BsmtExposure), \"BsmtExposure\"] <- 'No'        \nfull.data[is.na(full.data$BsmtFinType1), \"BsmtFinType1\"] <- 'Unf' \nfull.data[is.na(full.data$BsmtFinType2), \"BsmtFinType2\"] <- 'Unf'    \nfull.data[is.na(full.data$BsmtFinSF2), \"BsmtFinSF2\"] <- 0                                         \nfull.data[is.na(full.data$BsmtUnfSF), \"BsmtUnfSF\"] <- 0                                                                                \nfull.data[is.na(full.data$TotalBsmtSF), \"TotalBsmtSF\"] <- 0\n                \n# MasVnr Data Cleaning\n# Replace NA with mode, very small size of NAs being replaced, so this is acceptible\n# NA = 24, NA = 23                                       \nfull.data[is.na(full.data$MasVnrType), \"MasVnrType\"] <- 'None'\nfull.data[is.na(full.data$MasVnrArea), \"MasVnrArea\"] <- median(na.omit(full.data$MasVnrArea))\n\n\n                                                                   \n# Garage Data Cleaning\n# Replace NA with mode, very small size of NAs being replaced, so this is acceptible\n# NA = 157, NA = 159, NA = 159, NA = 159, NA = 159                                                 \nfull.data[is.na(full.data$GarageType), \"GarageType\"] <- 'Attchd'  \n\nfull.data[,\"GarageYrBlt\"] <- full.data$GarageYrBlt                              \n# Make randomizer based off discrete probability distribution using sample()\nGarageYrBlt.map <- count(full.data, \"GarageYrBlt\")\nGarageYrBlt.map <- GarageYrBlt.map[-nrow(GarageYrBlt.map),] # Remove number of NAs - last row of DF\ncum_sum.freq <- sum(GarageYrBlt.map$freq) \nGarageYrBlt.probs <- mapply(function(x) {return (x / cum_sum.freq)}, GarageYrBlt.map$freq) # Probabilities of all GarageBltYrs\nfull.data[is.na(full.data$GarageYrBlt), \"GarageYrBlt\"] <- as.vector(sample(x = GarageYrBlt.map$GarageYrBlt, \n                                                                           size = 159, \n                                                                           replace = TRUE, \n                                                                           prob = GarageYrBlt.probs))\n\n\n# Make randomizer based off discrete probability distribution using sample()\nGarageFinish.map <- count(full.data, \"GarageFinish\")\nGarageFinish.map  <- GarageFinish.map [-nrow(GarageFinish.map ),] # Remove number of NAs - last row of DF\ncum_sum.freq <- sum(GarageFinish.map$freq) \nGarageFinish.probs <- mapply(function(x) {return (x / cum_sum.freq)}, GarageFinish.map$freq) # Probabilities of all GarageFinish\nfull.data[is.na(full.data$GarageFinish), \"GarageFinish\"] <- as.vector(sample(x = GarageFinish.map$GarageFinish, \n                                                                           size = 159, \n                                                                           replace = TRUE, \n                                                                           prob = GarageFinish.probs))\nfull.data[is.na(full.data$GarageQual), \"GarageQual\"] <- 'TA'\nfull.data[is.na(full.data$GarageCond), \"GarageCond\"] <- 'TA'\n# Lot Frontage Cleaning\n# Make randomizer based off discrete probability distribution using sample()\nLotFrontage.map <- count(full.data, \"LotFrontage\")\nLotFrontage.map  <- LotFrontage.map [-nrow(LotFrontage.map),] # Remove number of NAs - last row of DF\ncum_sum.freq <- sum(LotFrontage.map$freq) \nLotFrontage.probs <- mapply(function(x) {return (x / cum_sum.freq)}, LotFrontage.map$freq) # Probabilities of all LotFrontage\nfull.data[is.na(full.data$LotFrontage), \"LotFrontage\"] <- as.vector(sample(x = LotFrontage.map$LotFrontage, \n                                                                           size = 486, \n                                                                           replace = TRUE, \n                                                                           prob = LotFrontage.probs))\n                                         \n\n# FireplaceQu Cleaning\n# Make randomizer based off discrete probability distribution using sample()\nFireplaceQu.map <- count(full.data, \"FireplaceQu\")\nFireplaceQu.map <- FireplaceQu.map[-nrow(FireplaceQu.map),] # Remove number of NAs - last row of DF\ncum_sum.freq <- sum(FireplaceQu.map$freq)\nFireplaceQu.probs <- mapply(function(x) {return (x / cum_sum.freq)}, FireplaceQu.map$freq) # Probabilities of all FireplaceQu\nfull.data[is.na(full.data$FireplaceQu), \"FireplaceQu\"] <- as.vector(sample(x = FireplaceQu.map$FireplaceQu, \n                                                                           size = 1420, \n                                                                           replace = TRUE, \n                                                                           prob = FireplaceQu.probs))\n\n\n# MS Zoning Cleaning\nfull.data[is.na(full.data$MSZoning), \"MSZoning\"] <- 'RL'\n                                         \n# Utilities Cleaning\nfull.data[is.na(full.data$Utilities), \"Utilities\"] <- 'AllPub'\n                                         \n# Exteriors Cleaning\nfull.data[is.na(full.data$Exterior1st), \"Exterior1st\"] <- 'VinylSd'  \nfull.data[is.na(full.data$Exterior2nd), \"Exterior2nd\"] <- 'VinylSd'\n                                         \n# Misc Cleaning\nfull.data[is.na(full.data$Electrical), \"Electrical\"] <- 'SBrkr'\nfull.data[is.na(full.data$BsmtFullBath), \"BsmtFullBath\"] <- 0\nfull.data[is.na(full.data$BsmtHalfBath), \"BsmtHalfBath\"] <- 0\nfull.data[is.na(full.data$KitchenQual), \"KitchenQual\"] <- 'TA'\nfull.data[is.na(full.data$Functional), \"Functional\"] <- 'Typ'   \nfull.data[is.na(full.data$GarageCars), \"GarageCars\"] <- 2\nfull.data[is.na(full.data$GarageArea), \"GarageArea\"] <- 0\nfull.data[is.na(full.data$SaleType), \"SaleType\"] <- 'WD'  \n\n\n\n                                         \n# Split back into train and test data\ntrain.data <- as.data.frame(full.data[full.data$isTrain == TRUE, \n                                      !names(full.data) %in% c(\"isTrain\", \"Id\")],stringsAsFactors=TRUE)\ntest.data <- as.data.frame(full.data[full.data$isTrain == FALSE, \n                                     !names(full.data) %in% c(\"isTrain\", \"SalePrice\")])\n\n# Train Gradient Boosted Machine\ngbm_model_1 <- gbm(formula = SalePrice ~ ., data = train.data, distribution = \"gaussian\", n.trees  = 250)\n\ngbm_model_2 <- gbm(formula = SalePrice ~ ., data = train.data.imputed, distribution = \"gaussian\", n.trees = 510)\nsale_predictions <- predict(gbm_model_2, newdata = test.data, n.trees = 300, interaction.depth = 2)\noutput <- data.frame(\"Id\" = test.data$Id, \"SalePrice\" = sale_predictions)\n                                         \nfwrite(x = output, file = \"submission.csv\")                            \n#plot(full.data$GarageYrBlt)",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "metadata": {
+        "trusted": true,
+        "_uuid": "900d7518c34d0e240d66f4f3ce11ab946bc11cc1"
+      },
+      "cell_type": "code",
+      "source": "",
+      "execution_count": null,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "display_name": "R",
+      "language": "R",
+      "name": "ir"
+    },
+    "language_info": {
+      "mimetype": "text/x-r-source",
+      "name": "R",
+      "pygments_lexer": "r",
+      "version": "3.4.2",
+      "file_extension": ".r",
+      "codemirror_mode": "r"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 1
+}
